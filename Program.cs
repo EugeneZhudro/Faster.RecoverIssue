@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 
 namespace RecoverIssue
 {
@@ -9,6 +10,7 @@ namespace RecoverIssue
     {
         static void Main(string[] args)
         {
+            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
             try
             {
 
@@ -30,6 +32,33 @@ namespace RecoverIssue
             {
                 Console.WriteLine(ex.ToString());
             }
+        }
+
+        private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
+        {
+            Console.WriteLine($"UnhandledException: {e.ExceptionObject.ToString()}");
+        }
+
+
+        private static async Task<bool> TrySave(FasterKV<string, List<string>> store, List<UpdateInfo> updateData)
+        {
+            var updateFailed = false;
+            using (var session = store.NewSession(new UpdateFunction()))
+            {
+                foreach (var updInfo in updateData)
+                {
+                    var status = session.RMW(updInfo.Key, updInfo);
+                     if (status == Status.ERROR)
+                    {
+                        updateFailed = true;
+                        break;
+                    }
+                }
+                await session.CompletePendingAsync();
+            }
+
+            await store.TakeHybridLogCheckpointAsync(CheckpointType.FoldOver);
+            return !updateFailed;
         }
     }
 }
